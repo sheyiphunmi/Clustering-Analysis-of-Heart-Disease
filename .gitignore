@@ -1,0 +1,6 @@
+# Ignore R files
+*.R
+# Ignore html files
+*.html
+# Ignore unwanted folders 
+Famd_files/ 

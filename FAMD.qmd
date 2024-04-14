@@ -1,0 +1,191 @@
+---
+author: Seyifunmi M. Owoeye 
+title: "Factorial Analysis of Mixed Data + DBSCAN"
+format: pdf
+editor: visual
+text-align: justify
+---
+
+```{css, echo = FALSE}
+p {
+  text-align: justify
+}
+```
+
+```{r}
+set.seed(42)
+```
+
+> ## Background
+>
+> Factorial analysis of mixed data (FAMD) is a dimension-reduction technique that reduces the dimensionality of large data sets containing categorical and numerical features. It also aids in examining the relationship between all features (Pagès, 2004).
+>
+> ***References***
+>
+> -   Pagès, J. 2004. “Analyse Factorielle de Donnees Mixtes.” *Revue Statistique Appliquee* 4: 93–111.
+
+```{r, settings= "warnings=false"}
+
+suppressPackageStartupMessages({
+  library("FactoMineR")
+  library("factoextra")
+  library("corrplot")
+  library(dbscan)
+  library(fpc)
+  library(FNN)
+  library(flexmix)
+  library(ggplot2)
+  library(gridExtra)
+})
+```
+
+> ### Load dataset
+
+```{r}
+data <- read.csv("heart_disease.csv", header = T)
+data <- subset(data, select = -c(disease))   
+```
+
+```{r}
+res.famd <- FAMD(data, ncp = 13, sup.var = NULL, ind.sup = NULL, graph = FALSE)
+res.famd
+```
+
+> The proportion of variances retained by the different dimensions are:
+
+```{r}
+eig.val <- get_eigenvalue(res.famd)
+print(head(eig.val,9))
+fviz_screeplot(res.famd)
+
+
+```
+
+> As seen in the results above, we need the `first 8` dimensions to explain at least `80%` of the variability in the dataset.
+
+> The FAMD results for each data point are stored in the code chunk below. The coordinates from each dimension will be used to perform the clustering analysis.
+
+```{r}
+ind <- get_famd_ind(res.famd)
+ind
+
+head(ind$coord)
+```
+
+> ### Accessing the correlation between features and their contributions to each component.
+
+```{r}
+fviz_famd_var(res.famd, repel = TRUE, col.var = "contrib", 
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+
+#### First 2 Dimensions or Components
+
+```{r}
+# --Plot of variables
+# fviz_famd_var(res.famd, repel = TRUE, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+
+# # Contribution to the first dimension
+# fviz_contrib(res.famd, "var", axes = 1:6)
+# # Contribution to the second dimension
+# fviz_contrib(res.famd, "var", axes = 2)
+
+# Most contributing quantitative and ordianal features
+p <- fviz_famd_var(res.famd, "quanti.var", col.var = "contrib", 
+                   gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                   repel = TRUE)  + 
+          ggtitle("A: Quantitave + Ordinal Features")
+
+q <- fviz_famd_var(res.famd, "quali.var", col.var = "contrib", 
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")) + 
+                ggtitle("B: Nominal Features")
+
+grid.arrange(p, q, ncol = 2) 
+
+
+
+```
+
+> The figure above shows the relationship between the features, their percentage contribution, and the quality of their representation on the factor map. `Figure A` shows that `chol`, `trestbps`, `age` and `ca` are positively correlated and are negatively correlated with `slope`, `thalach` and `slope`. The idea is that positively correlated features are grouped while negatively correlated features are on a different quadrant in the plot. The figure also shows that `age`, `thalach`, `oldpeak`, `slope` and `trestbps` contribute most to the first and second dimensions. Additionally, the distance between the origin and each variable measures the quality of the variable representation on the map, with the most represented features being far away from the origin.
+>
+> Of the three nominal features, `exang = Yes` contributed most to the first and second dimensions `(Figure B)`.
+
+### All Dimensions
+
+```{r}
+var <- get_famd_var(res.famd)
+
+# Set up a 1x2 layout for plots
+par(mfrow = c(1, 2), cex = 0.7)
+
+corrplot(var$contrib, is.corr = FALSE, method = "circle",
+         diag = FALSE, tl.col = "black",
+         title = "C: Contributions", mar = c(1, 0, 1, 0))
+corrplot(var$cos2, is.corr = FALSE, method = "circle",
+         diag = FALSE, tl.col = "black",
+         title = "D: Representation", mar = c(1, 0, 1, 0))
+```
+
+### Individual Data Points
+
+```{r}
+fviz_famd_ind(res.famd, col.ind = "contrib", 
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = FALSE# 
+)
+```
+
+> **Conclusion:** Based on the findings and observations above, the first 9 components will be used for clustering analysis. These components account for 80% of the variability in the data.
+
+### Extracting the Low-Dimension Data
+
+```{r}
+ind <- get_famd_ind(res.famd)
+
+famd_data <- as.data.frame(ind$coord[,1:8])
+head(famd_data)
+
+
+write.csv(famd_data, "heart_disease_reduced.csv")
+```
+
+### Performing Density-Based Spatial Clustering of Applications with Noise (DBSCAN)
+
+Before employing DBSCAN, it is important to determine the optimal `ε` and `minimum points`. The `k-distance graph` would be used to estimate `ε.`
+
+#### Estimating `ε` Using k-Distance Graph
+
+```{r}
+k <- 5
+
+dist_k <- knn.dist(famd_data, k = k)
+sorted_dist_k <- sort(dist_k[, k])
+
+
+hist(sorted_dist_k)
+abline(v = 3, col ="red")
+
+```
+
+Based on the distribution of distances, our choice of `ε is 3` and the `minimum point is [4,5]` .
+
+#### DBSCAN
+
+```{r}
+epsilon = 3
+
+dbscan_result <- fpc::dbscan(famd_data, eps = epsilon, MinPts = 4)
+# Get cluster labels
+cluster_labels <- dbscan_result$cluster
+
+unique_clusters <- unique(cluster_labels)
+
+print(unique_clusters)
+
+```
+
+**Remarks:** The result above shows that `DBSCAN` failed to identify distinct clusters within the data.
+
+```{r}
+plot(famd_data, col = cluster_labels+1, pch = 20, main = "DBSCAN Clustering")
+```
